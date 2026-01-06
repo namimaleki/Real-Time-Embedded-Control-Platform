@@ -14,6 +14,9 @@
 #include "tasks_telemetry.h"
 #include "tasks_load.h"
 
+#include "pwm_driver.h"
+
+
 #include <climits>
 
 
@@ -45,10 +48,32 @@ void setup() {
 
   Serial.println("\nESP32 RTOS Week 1: starting...");
 
-  // Initialize stats before tasks start using them
+  /* Initialize stats before tasks start using them */
   stats_init(&stats);
 
-  
+  /* ========== PWM SETUP ======== */
+  /**
+   * We now add a real "actuator output" to the system.
+   * For now the actuator is just an LED (brightness controlled via PWM).
+   *
+   * This is still the same skill as motor control:
+   * - motors use PWM for speed/torque (through a motor driver)
+   * - LEDs use PWM for brightness
+   *
+   * IMPORTANT: We initialize hardware drivers BEFORE starting tasks
+   * so tasks don't try to use uninitialized peripherals.
+   */
+  pwm_config_t pwm= {.gpio_pin = 18, .channel = 0, .frequency = 5000, .resolution_bits = 8, .initial_duty = 0.0f };
+
+  pwm_result_t result = pwm_init(&pwm);
+  if (result != PWM_OK){
+    Serial.printf("[pwm] init failed: %s\n", pwm_error_to_string(result));
+    Serial.println("[pwm] Entering SAFE mode because actuator driver did not init.");
+    safe_mode = true;  // fail safe: if actuator driver is broken, don't run control
+  }
+  else {
+    Serial.println("[pwm] init ok (GPIO18, channel 0)");
+  }
   /*On ESP32 there are 2 cores (0 and 1). Pinning is optional.
     Pinning helps reduce interference: we keep control on core 1,
     load on core 0.

@@ -7,6 +7,7 @@
 #include "shared_state.h"
 #include "tasks_telemetry.h"
 
+#include "pwm_driver.h"
 
 /* ================================= TELEMETRY TASK (OBSERVABILITY) ====================== */
 
@@ -49,23 +50,48 @@ static void telemetry_task(void *arg){
      */
     const float jitter_us = (float)(max_dt - min_dt);
 
+
+    /* READ PWM DUTY */
     /**
-     * Professional telemetry format:
-     * - Clear section headers
-     * - All relevant metrics
-     * - Units clearly labeled
+     * We read the duty we last set on PWM channel 0.
+     * This proves that:
+     * - the control task is commanding an actuator output
+     * - the actuator command changes over time
+     * If it fails (driver not initialized), we just print "N/A".
      */
-    Serial.println();
-    Serial.println("========== RTOS TIMING STATISTICS ==========");
-    Serial.printf("System Mode:     %s\n", safe_mode ? "SAFE" : "RUN");
-    Serial.printf("Control Rate:    %lu Hz (%.1f µs expected)\n", (unsigned long)CONTROL_HZ, expected_us);
-    Serial.println("--------------------------------------------");
-    Serial.printf("Period (µs):     last=%-6ld  min=%-6ld  max=%-6ld  avg=%.1f\n", (long)last_dt, (long)min_dt, (long)max_dt, avg_dt);
-    Serial.printf("Jitter:          %.1f µs\n", jitter_us);
-    Serial.printf("Samples:         %lu\n", (unsigned long)n);
-    Serial.printf("Missed Deadlines: %lu\n", (unsigned long)misses);
-    Serial.printf("CPU Load:        %.0f%%\n", cpu_load_lvl * 100.0f);
-    Serial.println("============================================");
+    float duty_percent = 0.0f;
+    bool duty_valid = (pwm_get_duty(0, &duty_percent) == PWM_OK);
+    
+    char buf[640];
+
+    int written = snprintf(buf, sizeof(buf),
+      "\n========== RTOS TIMING STATISTICS ==========\n"
+      "System Mode:      %s\n"
+      "Control Rate:     %lu Hz (%.1f us expected)\n"
+      "--------------------------------------------\n"
+      "Period (us):      last=%ld  min=%ld  max=%ld  avg=%.1f\n"
+      "Jitter (us):      %.1f\n"
+      "Samples:          %lu\n"
+      "Missed Deadlines: %lu\n"
+      "CPU Load:         %.0f%%\n"
+      "PWM Duty (ch0):   %s\n"
+      "============================================\n",
+      safe_mode ? "SAFE" : "RUN",
+      (unsigned long)CONTROL_HZ, expected_us,
+      (long)last_dt, (long)min_dt, (long)max_dt, avg_dt,
+      jitter_us,
+      (unsigned long)n,
+      (unsigned long)misses,
+      cpu_load_lvl * 100.0f,
+      duty_valid ? (String(duty_percent, 1) + "%").c_str() : "N/A"
+    );
+
+    /* If snprintf failed for some reason, still try to print something */
+    if (written > 0) {
+      Serial.print(buf);
+    } else {
+      Serial.println("[telemetry] snprintf failed");
+    }
 
     /**
      * SAFE MODE ALERT

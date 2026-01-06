@@ -7,6 +7,9 @@
 #include "shared_state.h"
 #include "tasks_control.h"
 
+#include "pwm_driver.h"
+
+
 /* ======================== CONTROL TASK (HEART OF THE SYSTEM) ===================== */
 
 /**
@@ -37,6 +40,8 @@ static void control_task(void *arg){
 
     /* Check if we need to enter safe mode */
     if (safe_mode){
+      /* Need to ensure actuators are OFF */
+      pwm_emergency_stop_all();
       continue;
     }
 
@@ -76,8 +81,44 @@ static void control_task(void *arg){
 
       if (stats.missed_deadlines >= 5){
         safe_mode = true;
+        pwm_emergency_stop_all();
+        continue;
       }
     }
+
+    /* ===================== ACTUATOR OUTPUT (PWM) ===================== */
+    /**
+     *  we need a physical output that proves:
+     * - our control task can command an actuator
+     * - PWM driver works
+     * - scheduling stays stable while controlling hardware
+     *
+     * We'll generate a simple triangle wave duty cycle:
+     * 0% -> 100% -> 0% -> repeat
+     *
+     * This makes an LED "breathe" (brightness goes up and down).
+     *
+     * Later:
+     * - This block becomes: compute PID output and set motor PWM.
+     */
+    static float duty = 0.0f;    // duty in percent (0..100)
+    static float step = 1.0f;    // how fast we change duty per control iteration
+
+    duty += step;
+
+    if (duty >= 100.0f) {
+      duty = 100.0f;
+      step = -step;
+    } else if (duty <= 0.0f) {
+      duty = 0.0f;
+      step = -step;
+    }
+
+    /**
+     * This is the actual actuator command.
+     * Channel 0 is what we configured in pwm_init() in main.cpp.
+     */
+    pwm_set_duty(0, duty);
 
   }
 }
