@@ -1,4 +1,4 @@
-# ESP32 RTOS Robotics Control Stack (FreeRTOS + Drivers + Control)
+# Real Time Embedded Control Platform 
 
 I started this project because robotics is genuinely what I’m most excited about, and I wanted a personal project that forces me to build embedded systems the way they’re built in real robots — not just Arduino “loop code”, but actual real-time tasks, driver layers, and a control loop that has to run deterministically.
 
