@@ -13,6 +13,10 @@
 #include "tasks_control.h"
 #include "tasks_telemetry.h"
 #include "tasks_load.h"
+#include "imu_driver.h"
+#include "ipc.h"
+#include "tasks_sensor.h"
+
 
 #include "pwm_driver.h"
 
@@ -35,6 +39,10 @@ volatile float cpu_load_lvl = 0.80f;
 
 timing_stats_t stats;
 
+/* Latest IMU pitch estimate (degrees), computed in control_task. We will store this as a GLOBAL so telemetry_task can print it 
+   and control task can update it. Also note that we use volatile since mulktple takss acces it (volatile prevents compiler form caching it) */
+volatile float imu_pitch_deg = 0.0f; 
+
 
 /* ===================== ARDUINO ENTRYPOINTS =================== */
 void setup() {
@@ -50,6 +58,31 @@ void setup() {
 
   /* Initialize stats before tasks start using them */
   stats_init(&stats);
+
+  /* ============ IPC (QUEUE) SETUP ======== */
+  /** 
+   * NOTES FOR MYSELF: Remember IPC (inter process communication or ig in RTOS world inter task ccommunication) is used so that 
+   * the sensor_task which produces the imu_sample_t into the queue and control_task (consumer) pulls imu_sample_t out of the queue
+   * so it allows these tasks to communicate with one another. Also the queue must exist before starting 
+   * sensor or control tasks or else they will try to use a null queuee and that's trouble
+   */
+  if (!ipc_init()) {
+    Serial.println("[ipc] init failed -> entering SAFE mode"); 
+    safe_mode = true; 
+  }
+
+  /* ========= IMU DRIVER INIT ========= */
+  /* Initialize the IMU driver */
+  imu_config_t imu_cfg = {.i2c_addr = MPU6050_I2C_ADDR, .i2c_clock_hz = 400000};
+  imu_result_t ir = imu_init(&imu_cfg); 
+  if (ir != IMU_OK) {
+    Serial.printf("[imu] init failed: %s\n", imu_error_to_string(ir));
+    Serial.println("[imu] entering SAFE mode");
+    safe_mode = true;  /* fail-safe: don’t trust control if sensor layer is broken */
+  }
+  else {
+    Serial.println("[imu] init ok");
+  }
 
   /* ========== PWM SETUP ======== */
   /**
@@ -80,6 +113,7 @@ void setup() {
   */
 
   start_control_task();
+  start_sensor_task();
   start_telemetry_task();
   start_load_task();
 

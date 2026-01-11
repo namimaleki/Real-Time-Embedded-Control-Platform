@@ -6,6 +6,9 @@
 #include "app_config.h"
 #include "shared_state.h"
 #include "tasks_control.h"
+#include "ipc.h"
+#include "imu_driver.h"
+#include <math.h>
 
 #include "pwm_driver.h"
 
@@ -27,6 +30,10 @@ static void control_task(void *arg){
   /* so our last wake time will be the reference point for periodic scheudling */
   TickType_t last_wake = xTaskGetTickCount();
 
+  /* We keep the latest known sample so control can run even if the queue doesn't have a new sample every single cycle */
+  imu_sample_t last_sample = {};
+  bool have_sample = false; 
+
   /* main control loop this will run forever */
   while (true) {
     /**
@@ -45,6 +52,37 @@ static void control_task(void *arg){
       continue;
     }
 
+    /* ============= SENSOR INPUT (IMU QUEUE) ========== */
+   /**
+     * sensor_task pushes imu_sample_t into imu_queue.
+     * control_task pulls the LATEST sample out.
+     *
+     * We use NON-BLOCKING receive (timeout = 0) because:
+     * - control_task is timing-critical
+     * - it must never stall waiting for sensor data
+     *
+     * If there is no new sample right now, we just keep last_sample.
+     */
+
+     imu_sample_t s; 
+     if (xQueueReceive(imu_queue, &s, 0) == pdTRUE) {
+      last_sample = s; 
+      have_sample = true; 
+     }
+     if (!have_sample){
+      /* if we don't have one sample yet don't run the control logic to avoid using zeros or producing fake actuator outputs */
+      continue; 
+     }
+
+   /**
+     * PID needs a dt (time step).
+     * We run the loop at CONTROL_HZ, so dt is deterministic:
+     * dt = 1 / CONTROL_HZ seconds.
+     *
+     * We'll use this dt for PID math (more stable than using jittery measured dt_time).
+     */
+    const float dt = 1.0f / (float)CONTROL_HZ;
+     
 
     /* Measure the actual time between iterations (we do this so we can make sure actual = expected since it can still vary though to interrupts and cpu load) */
     int64_t current_us = esp_timer_get_time();
